@@ -13,6 +13,8 @@ import os
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
+import gspread
+from google.oauth2.service_account import Credentials
 from datetime import datetime
 
 app = Flask(__name__)
@@ -20,7 +22,8 @@ app = Flask(__name__)
 # ── CONFIG ────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL             = "claude-sonnet-4-5"
-EXCEL_PATH        = os.path.join(os.path.expanduser("~"), "Desktop", "Credit_Risk_Portfolio.xlsx")
+SHEET_ID          = "13pFG_57Eb6EOGeuw90B65Z6q2LkuhSqfAFLPYE83zrk"
+EXCEL_PATH        = "/tmp/Credit_Risk_Portfolio.xlsx"
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -634,7 +637,7 @@ document.getElementById('borrowerForm').addEventListener('submit', async functio
       </div>
 
       <div class="excel-badge">
-        📊 Saved to <b>Credit_Risk_Portfolio.xlsx</b> on Desktop (Record #${r.total_records})
+        📊 Saved to Google Sheets — Record #${r.total_records} · <a href='https://docs.google.com/spreadsheets/d/13pFG_57Eb6EOGeuw90B65Z6q2LkuhSqfAFLPYE83zrk' target='_blank' style='color:#065F46;font-weight:700'>Open Sheet ↗</a>
       </div>
 
       <button class="new-assessment-btn" onclick="newAssessment()">
@@ -852,6 +855,47 @@ Return ONLY this JSON (no markdown):
     text  = resp.content[0].text.strip()
     match = re.search(r'\{[\s\S]*\}', text)
     return json.loads(match.group()) if match else {}
+
+
+def save_to_sheets(bw,l1,l2,l3,ai):
+    total_records=0
+    try:
+        creds_json=os.environ.get("GOOGLE_CREDENTIALS_JSON","")
+        if creds_json:
+            import json as json_lib
+            creds_dict=json_lib.loads(creds_json)
+            scopes=["https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive"]
+            creds=Credentials.from_service_account_info(creds_dict,scopes=scopes)
+            gc=gspread.authorize(creds)
+            sh=gc.open_by_key(SHEET_ID)
+            ws=sh.sheet1
+            if not ws.get_all_values():
+                headers=["Timestamp","Borrower","Loan ($)","Grade","Score","Decision",
+                         "PD","LGD","EL ($)","Rate (%)","IFRS 9","L1","L2","L3",
+                         "Confidence","Stress Mild","Stress Moderate","Stress Severe",
+                         "Cycle","Rationale","Conditions","Red Flags"]
+                ws.append_row(headers)
+            stress=ai.get("stress_test",{})
+            row=[
+                datetime.now().strftime("%d %b %Y %H:%M"),
+                bw["name"],bw["loan_amount"],
+                ai.get("grade",""),ai.get("composite_score",0),ai.get("decision",""),
+                f"{l3['adjusted_pd']:.2%}",f"{l1['lgd']:.1%}",round(l1["el"],0),
+                ai.get("suggested_rate",0),ai.get("ifrs9_stage",""),
+                l1["l1_score"],l2["l2_score"],l3["l3_score"],ai.get("confidence",0),
+                stress.get("mild_recession",""),stress.get("moderate_recession",""),
+                stress.get("severe_recession",""),l3["cycle"],
+                ai.get("rationale",""),
+                " | ".join(ai.get("conditions",[])),
+                " | ".join(ai.get("red_flags",[])),
+            ]
+            ws.append_row(row)
+            total_records=len(ws.get_all_values())-1
+            print(f"Saved to Google Sheets — Record #{total_records}")
+    except Exception as e:
+        print(f"Google Sheets error: {e}")
+    return total_records
 
 def save_excel(bw, l1, l2, l3, ai):
     if os.path.exists(EXCEL_PATH):
