@@ -14,6 +14,7 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 import gspread
+import sys
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -861,8 +862,8 @@ def save_to_sheets(bw,l1,l2,l3,ai):
     total_records=0
     try:
         creds_json=os.environ.get("GOOGLE_CREDENTIALS_JSON","")
-        print(f"CREDS_JSON length: {len(creds_json)}")
-        print(f"CREDS_JSON starts with: {creds_json[:30] if creds_json else 'EMPTY'}")
+        print(f"CREDS_JSON length: {len(creds_json)}", flush=True)
+        print(f"CREDS_JSON starts with: {creds_json[:30] if creds_json else 'EMPTY'}", flush=True)
         if creds_json:
             import json as json_lib
             creds_dict=json_lib.loads(creds_json)
