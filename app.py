@@ -861,12 +861,23 @@ Return ONLY this JSON (no markdown):
 def save_to_sheets(bw,l1,l2,l3,ai):
     total_records=0
     try:
-        creds_json=os.environ.get("GOOGLE_CREDENTIALS_JSON","")
-        print(f"CREDS_JSON length: {len(creds_json)}", flush=True)
-        print(f"CREDS_JSON starts with: {creds_json[:30] if creds_json else 'EMPTY'}", flush=True)
-        if creds_json:
-            import json as json_lib
-            creds_dict=json_lib.loads(creds_json)
+        private_key=os.environ.get("GOOGLE_PRIVATE_KEY","").replace("\\n","\n")
+        client_email=os.environ.get("GOOGLE_CLIENT_EMAIL","")
+        project_id=os.environ.get("GOOGLE_PROJECT_ID","")
+        private_key_id=os.environ.get("GOOGLE_PRIVATE_KEY_ID","")
+        print(f"client_email: {client_email}", flush=True)
+        print(f"private_key length: {len(private_key)}", flush=True)
+        if client_email and private_key:
+            creds_dict={
+                "type":"service_account",
+                "project_id":project_id,
+                "private_key_id":private_key_id,
+                "private_key":private_key,
+                "client_email":client_email,
+                "client_id":"",
+                "auth_uri":"https://accounts.google.com/o/oauth2/auth",
+                "token_uri":"https://oauth2.googleapis.com/token",
+            }
             scopes=["https://www.googleapis.com/auth/spreadsheets",
                     "https://www.googleapis.com/auth/drive"]
             creds=Credentials.from_service_account_info(creds_dict,scopes=scopes)
