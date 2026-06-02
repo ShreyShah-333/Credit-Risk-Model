@@ -894,7 +894,7 @@ def save_to_sheets(bw,l1,l2,l3,ai):
             total_records=len(ws.get_all_values())-1
             print(f"Saved to Google Sheets — Record #{total_records}")
     except Exception as e:
-        print(f"Google Sheets error: {e}")
+        import traceback; print(f"Google Sheets error: {e}"); traceback.print_exc()
     return total_records
 
 def save_excel(bw, l1, l2, l3, ai):
