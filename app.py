@@ -853,19 +853,22 @@ Return ONLY this JSON (no markdown):
 "ai_score_adjustment":<int -50 to 50>,"ai_adjustment_reason":"<str>"}}"""
 
     resp = client.messages.create(
-        model=MODEL, max_tokens=1000,
-        system="You are a Senior Credit Risk Officer. Return ONLY valid JSON.",
+        model=MODEL, max_tokens=2000,
+        system="You are a Senior Credit Risk Officer. Return ONLY valid JSON. Be concise.",
         messages=[{"role":"user","content":prompt}]
     )
-    text  = resp.content[0].text.strip()
-    match = re.search(r'\{[\s\S]*\}', text)
+    text = resp.content[0].text.strip()
+    # Remove markdown code blocks if present
+    text = re.sub(r"```json|```", "", text).strip()
+    print(f"AI RAW: {text[:300]}", flush=True)
     try:
-        match=re.search(r'\{[\s\S]*\}',text)
+        match = re.search(r'\{[\s\S]*\}', text)
         if match:
             return json.loads(match.group())
-        return {}
-    except:
-        return {}
+    except Exception as e:
+        print(f"AI JSON error: {e}", flush=True)
+        print(f"AI response: {text[:200]}", flush=True)
+    return {}
 
 
 def save_to_sheets(bw,l1,l2,l3,ai):
