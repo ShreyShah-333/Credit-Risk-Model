@@ -192,7 +192,7 @@ HTML = """
 <body>
 
 <div class="hero">
-  <h1>🏦 CREDIT RISK MODEL AI AGENT</h1>
+  <h1>🏦 CREDIT RISK MODEL AI AGENT</h1><div style="margin-top:10px"><a href="/results" style="background:#F4A261;color:white;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:600;text-decoration:none;">📊 View All Results</a></div>
   <p>Basel III · IFRS 9 · 3-Layer Ensemble · Powered by Claude Sonnet 4</p>
   <div class="tags">
     <span class="tag">Layer 1: Quantitative</span>
