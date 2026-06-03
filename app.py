@@ -673,6 +673,10 @@ function newAssessment() {
 # CREDIT RISK ENGINE
 # ============================================================
 
+
+# In-memory results storage
+ASSESSMENTS = []
+
 def logistic(x):
     return 1 / (1 + math.exp(-x))
 
@@ -925,6 +929,20 @@ def save_to_sheets(bw,l1,l2,l3,ai):
         import traceback
         print(f"Database error: {e}", flush=True)
         traceback.print_exc()
+    # Always save to memory regardless of database
+    ASSESSMENTS.append({
+        "timestamp": datetime.now().strftime("%d %b %Y %H:%M"),
+        "borrower": bw["name"],
+        "loan": bw["loan_amount"],
+        "grade": ai.get("grade",""),
+        "score": ai.get("composite_score",0),
+        "decision": ai.get("decision",""),
+        "pd": f"{l3['adjusted_pd']:.2%}",
+        "el": round(l1["el"],0),
+        "rate": ai.get("suggested_rate",0),
+        "ifrs9": ai.get("ifrs9_stage",""),
+        "rationale": ai.get("rationale",""),
+    })
     return total_records
 
 def save_excel(bw, l1, l2, l3, ai):
@@ -1076,3 +1094,42 @@ if __name__ == "__main__":
     print("🏦 Credit Risk Model starting...")
     print("📂 Open your browser at: http://127.0.0.1:8080")
     app.run(debug=False, port=8080, host="127.0.0.1")
+
+@app.route("/results")
+def results():
+    rows = ""
+    for a in reversed(ASSESSMENTS):
+        grade_color = {"AAA":"#10B981","AA":"#10B981","A":"#34D399","BBB":"#2E86AB","BB":"#F4A261","B":"#F59E0B","CCC":"#EF4444","D":"#7F1D1D"}.get(a["grade"],"#6B7280")
+        dec_color = {"Auto Approve":"#10B981","Approve":"#34D399","Conditional Approval":"#F4A261","Manual Review":"#F59E0B","Decline":"#EF4444"}.get(a["decision"],"#6B7280")
+        rows += f"""<tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:10px 12px;font-size:13px;">{a["timestamp"]}</td>
+            <td style="padding:10px 12px;font-size:13px;font-weight:600;">{a["borrower"]}</td>
+            <td style="padding:10px 12px;font-size:13px;">${a["loan"]:,.0f}</td>
+            <td style="padding:10px 12px;text-align:center;"><span style="background:{grade_color};color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700;">{a["grade"]}</span></td>
+            <td style="padding:10px 12px;text-align:center;font-weight:700;color:{grade_color};">{a["score"]}</td>
+            <td style="padding:10px 12px;text-align:center;"><span style="background:{dec_color};color:white;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;">{a["decision"]}</span></td>
+            <td style="padding:10px 12px;text-align:center;">{a["pd"]}</td>
+            <td style="padding:10px 12px;text-align:center;">${a["el"]:,.0f}</td>
+            <td style="padding:10px 12px;text-align:center;">{a["rate"]:.2f}%</td>
+            <td style="padding:10px 12px;text-align:center;">{a["ifrs9"]}</td>
+        </tr>"""
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Risk Portfolio</title>
+<style>*{{box-sizing:border-box;margin:0;padding:0}}body{{font-family:'Segoe UI',sans-serif;background:#F8FAFC}}
+.hero{{background:linear-gradient(135deg,#0A1628,#1A3A5C);padding:24px 32px;color:white}}
+.hero h1{{font-size:22px;font-weight:800}}.hero p{{color:#F4A261;font-size:12px;margin-top:4px}}
+.container{{max-width:1200px;margin:24px auto;padding:0 20px}}
+.card{{background:white;border:1px solid #E2E8F0;border-radius:12px;overflow:hidden}}
+.ch{{background:#0A1628;color:white;padding:12px 18px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center}}
+table{{width:100%;border-collapse:collapse}}
+th{{background:#1A3A5C;color:white;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;text-align:left}}
+tr:hover{{background:#F8FAFC}}.btn{{background:#2E86AB;color:white;padding:8px 18px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600}}
+.empty{{text-align:center;padding:40px;color:#6B7280;font-size:14px}}</style></head>
+<body><div class="hero"><h1>🏦 Credit Risk Portfolio</h1>
+<p>Session assessments · {len(ASSESSMENTS)} total records</p></div>
+<div class="container"><div class="card">
+<div class="ch"><span>📊 Assessment History</span><a href="/" class="btn">+ New Assessment</a></div>
+<table><tr><th>Time</th><th>Borrower</th><th>Loan</th><th>Grade</th><th>Score</th><th>Decision</th><th>PD</th><th>Exp Loss</th><th>Rate</th><th>IFRS9</th></tr>
+{"".join(rows) if ASSESSMENTS else "<tr><td colspan=10 class=\'empty\'>No assessments yet. <a href=\'/\'>Run your first →</a></td></tr>"}
+</table></div></div></body></html>"""
+    return html
+
