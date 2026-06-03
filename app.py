@@ -861,54 +861,70 @@ Return ONLY this JSON (no markdown):
 def save_to_sheets(bw,l1,l2,l3,ai):
     total_records=0
     try:
-        private_key=os.environ.get("GOOGLE_PRIVATE_KEY","").replace("\\n","\n")
-        client_email=os.environ.get("GOOGLE_CLIENT_EMAIL","")
-        project_id=os.environ.get("GOOGLE_PROJECT_ID","")
-        private_key_id=os.environ.get("GOOGLE_PRIVATE_KEY_ID","")
-        print(f"client_email: {client_email}", flush=True)
-        print(f"private_key length: {len(private_key)}", flush=True)
-        if client_email and private_key:
-            creds_dict={
-                "type":"service_account",
-                "project_id":project_id,
-                "private_key_id":private_key_id,
-                "private_key":private_key,
-                "client_email":client_email,
-                "client_id":"",
-                "auth_uri":"https://accounts.google.com/o/oauth2/auth",
-                "token_uri":"https://oauth2.googleapis.com/token",
-            }
-            scopes=["https://www.googleapis.com/auth/spreadsheets",
-                    "https://www.googleapis.com/auth/drive"]
-            creds=Credentials.from_service_account_info(creds_dict,scopes=scopes)
-            gc=gspread.authorize(creds)
-            sh=gc.open_by_key(SHEET_ID)
-            ws=sh.sheet1
-            if not ws.get_all_values():
-                headers=["Timestamp","Borrower","Loan ($)","Grade","Score","Decision",
-                         "PD","LGD","EL ($)","Rate (%)","IFRS 9","L1","L2","L3",
-                         "Confidence","Stress Mild","Stress Moderate","Stress Severe",
-                         "Cycle","Rationale","Conditions","Red Flags"]
-                ws.append_row(headers)
-            stress=ai.get("stress_test",{})
-            row=[
-                datetime.now().strftime("%d %b %Y %H:%M"),
-                bw["name"],bw["loan_amount"],
-                ai.get("grade",""),ai.get("composite_score",0),ai.get("decision",""),
-                f"{l3['adjusted_pd']:.2%}",f"{l1['lgd']:.1%}",round(l1["el"],0),
-                ai.get("suggested_rate",0),ai.get("ifrs9_stage",""),
-                l1["l1_score"],l2["l2_score"],l3["l3_score"],ai.get("confidence",0),
-                stress.get("mild_recession",""),stress.get("moderate_recession",""),
-                stress.get("severe_recession",""),l3["cycle"],
-                ai.get("rationale",""),
-                " | ".join(ai.get("conditions",[])),
-                " | ".join(ai.get("red_flags",[])),
-            ]
-            ws.append_row(row)
-            total_records=len(ws.get_all_values())-1
-            print(f"Saved to Google Sheets — Record #{total_records}")
+        import psycopg2
+        db_url=os.environ.get("DATABASE_URL","")
+        if not db_url:
+            print("No DATABASE_URL found", flush=True)
+            return 0
+        conn=psycopg2.connect(db_url, sslmode="require")
+        cur=conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS assessments (
+                id SERIAL PRIMARY KEY,
+                timestamp TEXT,
+                borrower TEXT,
+                loan_amount FLOAT,
+                grade TEXT,
+                score INTEGER,
+                decision TEXT,
+                pd TEXT,
+                lgd TEXT,
+                el FLOAT,
+                suggested_rate FLOAT,
+                ifrs9 TEXT,
+                l1_score INTEGER,
+                l2_score INTEGER,
+                l3_score INTEGER,
+                confidence INTEGER,
+                stress_mild TEXT,
+                stress_moderate TEXT,
+                stress_severe TEXT,
+                cycle TEXT,
+                rationale TEXT,
+                conditions TEXT,
+                red_flags TEXT
+            )
+        """)
+        stress=ai.get("stress_test",{})
+        cur.execute("""
+            INSERT INTO assessments
+            (timestamp,borrower,loan_amount,grade,score,decision,pd,lgd,el,
+             suggested_rate,ifrs9,l1_score,l2_score,l3_score,confidence,
+             stress_mild,stress_moderate,stress_severe,cycle,rationale,conditions,red_flags)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            datetime.now().strftime("%d %b %Y %H:%M"),
+            bw["name"],bw["loan_amount"],
+            ai.get("grade",""),ai.get("composite_score",0),ai.get("decision",""),
+            f"{l3['adjusted_pd']:.2%}",f"{l1['lgd']:.1%}",round(l1["el"],0),
+            ai.get("suggested_rate",0),ai.get("ifrs9_stage",""),
+            l1["l1_score"],l2["l2_score"],l3["l3_score"],ai.get("confidence",0),
+            stress.get("mild_recession",""),stress.get("moderate_recession",""),
+            stress.get("severe_recession",""),l3["cycle"],
+            ai.get("rationale",""),
+            " | ".join(ai.get("conditions",[])),
+            " | ".join(ai.get("red_flags",[])),
+        ))
+        conn.commit()
+        cur.execute("SELECT COUNT(*) FROM assessments")
+        total_records=cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        print(f"Saved to Supabase — Record #{total_records}", flush=True)
     except Exception as e:
-        import traceback; print(f"Google Sheets error: {e}"); traceback.print_exc()
+        import traceback
+        print(f"Database error: {e}", flush=True)
+        traceback.print_exc()
     return total_records
 
 def save_excel(bw, l1, l2, l3, ai):
