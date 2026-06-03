@@ -859,7 +859,13 @@ Return ONLY this JSON (no markdown):
     )
     text  = resp.content[0].text.strip()
     match = re.search(r'\{[\s\S]*\}', text)
-    return json.loads(match.group()) if match else {}
+    try:
+        match=re.search(r'\{[\s\S]*\}',text)
+        if match:
+            return json.loads(match.group())
+        return {}
+    except:
+        return {}
 
 
 def save_to_sheets(bw,l1,l2,l3,ai):
