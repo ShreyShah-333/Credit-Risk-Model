@@ -5,6 +5,23 @@
 # ============================================================
 
 from flask import Flask, render_template_string, request, jsonify
+import pickle
+import os
+
+# ── Load trained XGBoost model ────────────────────────────────
+MODEL_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "credit_risk_model") + "/"
+try:
+    with open(MODEL_DIR + 'xgb_model.pkl', 'rb') as f:
+        xgb_model = pickle.load(f)
+    with open(MODEL_DIR + 'features.pkl', 'rb') as f:
+        XGB_FEATURES = pickle.load(f)
+    with open(MODEL_DIR + 'calibration.pkl', 'rb') as f:
+        XGB_CALIBRATION = pickle.load(f)
+    XGB_LOADED = True
+    print("✅ XGBoost model loaded")
+except Exception as e:
+    XGB_LOADED = False
+    print(f"⚠️ Model not loaded: {e}")
 import anthropic
 import json
 import math
@@ -680,6 +697,88 @@ ASSESSMENTS = []
 def logistic(x):
     return 1 / (1 + math.exp(-x))
 
+
+
+def calibrate_pd(raw_pd):
+    """Scale raw XGBoost output to calibrated PD."""
+    try:
+        for low, high, cal_low, cal_high in XGB_CALIBRATION:
+            if low <= raw_pd < high:
+                ratio = (raw_pd - low) / (high - low)
+                return cal_low + ratio * (cal_high - cal_low)
+    except:
+        pass
+    return min(raw_pd, 0.65)
+
+def credit_score_to_rate(credit_score):
+    """Map credit score to implied interest rate."""
+    if credit_score >= 800:   return 6.5
+    elif credit_score >= 770: return 7.0
+    elif credit_score >= 750: return 7.6
+    elif credit_score >= 730: return 9.0
+    elif credit_score >= 710: return 10.5
+    elif credit_score >= 690: return 11.4
+    elif credit_score >= 670: return 13.0
+    elif credit_score >= 650: return 14.5
+    elif credit_score >= 630: return 15.1
+    elif credit_score >= 610: return 17.0
+    elif credit_score >= 590: return 19.0
+    elif credit_score >= 570: return 21.0
+    elif credit_score >= 550: return 23.5
+    elif credit_score >= 530: return 25.2
+    else:                     return 27.0
+
+def predict_pd_xgb(bw):
+    """Use trained XGBoost model for PD prediction."""
+    if not XGB_LOADED:
+        return None
+    try:
+        annual_inc  = bw["annual_income"]
+        loan_amnt   = bw["loan_amount"]
+        installment = loan_amnt / max(bw.get("loan_term_months", 60), 1)
+        credit_score = bw.get("credit_score", 680)
+
+        if credit_score >= 750:   grade_num = 1
+        elif credit_score >= 700: grade_num = 2
+        elif credit_score >= 660: grade_num = 3
+        elif credit_score >= 620: grade_num = 4
+        elif credit_score >= 580: grade_num = 5
+        else:                     grade_num = 6
+
+        features = {
+            "int_rate":          credit_score_to_rate(bw.get("credit_score", 680)),
+            "grade_num":         grade_num,
+            "term_months":       bw.get("loan_term_months", 60),
+            "dti":               bw["dti_ratio"] * 100,
+            "emp_years":         bw["employment_years"],
+            "is_mortgage":       1 if bw.get("home_ownership","") in
+                                  ["MORTGAGE","mortgage"] else 0,
+            "is_rent":           1 if bw.get("home_ownership","") in
+                                  ["RENT","rent","Rent"] else 0,
+            "inq_last_6mths":    bw.get("hard_inquiries", 0),
+            "delinq_2yrs":       bw.get("late_payments", 0),
+            "pub_rec":           bw.get("pub_rec", 0),
+            "revol_util":        bw.get("credit_util_pct", 0.45) * 100,
+            "open_acc":          bw.get("open_acc", 8),
+            "total_acc":         bw.get("total_acc", 20),
+            "dscr_proxy":        (annual_inc/12) / max(installment, 1),
+            "loan_to_income":    loan_amnt / max(annual_inc, 1),
+            "log_annual_inc":    np.log1p(annual_inc),
+            "log_revol_bal":     np.log1p(bw.get("revol_bal", 10000)),
+            "log_loan_amnt":     np.log1p(loan_amnt),
+            "high_risk_purpose": 1 if bw.get("loan_purpose","") in
+                                  ["small_business","moving","medical",
+                                   "renewable_energy","other"] else 0,
+        }
+        import pandas as pd
+        X = pd.DataFrame([features])[XGB_FEATURES]
+        raw_pd   = float(xgb_model.predict_proba(X)[0][1])
+        cal_pd   = calibrate_pd(raw_pd)
+        return round(cal_pd, 4)
+    except Exception as e:
+        print(f"XGBoost prediction error: {e}")
+        return None
+
 def run_layer1(bw):
     th  = CONFIG["thresholds"]
     ads = bw["monthly_debt"] * 12
@@ -839,10 +938,10 @@ def run_ai(bw, l1, l2, l3):
 L1:{l1['l1_score']} PD:{l1['pd']:.2%} DSCR:{l1['dscr']} DTI:{l1['dti']:.1%} LTV:{l1['ltv']:.1%} EL:${l1['el']:,.0f}
 L2:{l2['l2_score']} Flags:{l2['high_flags']}H·{l2['medium_flags']}M·{l2['low_flags']}L
 L3:{l3['l3_score']} Cycle:{l3['cycle']} AdjPD:{l3['adjusted_pd']:.2%}
-Raw:{raw}/1000 IFRS9:{l1['ifrs9_stage']}
+Raw:{raw}/1000 — composite_score MUST equal {raw} exactly, do NOT change it IFRS9:{l1['ifrs9_stage']}
 
 Return ONLY this JSON (no markdown):
-{{"composite_score":<int>,"grade":<AAA|AA|A|BBB|BB|B|CCC|D>,
+{{"composite_score":{raw},"grade":<AAA|AA|A|BBB|BB|B|CCC|D>,
 "decision":<Auto Approve|Approve|Conditional Approval|Manual Review|Decline>,
 "confidence":<int 70-99>,"ifrs9_stage":<Stage 1|Stage 2|Stage 3>,
 "adjusted_pd":<float>,"suggested_rate":<float %>,"layer_consistency":<str>,
@@ -864,7 +963,9 @@ Return ONLY this JSON (no markdown):
     try:
         match = re.search(r'\{[\s\S]*\}', text)
         if match:
-            return json.loads(match.group())
+            result = json.loads(match.group())
+            result["composite_score"] = raw
+            return result
     except Exception as e:
         print(f"AI JSON error: {e}", flush=True)
         print(f"AI response: {text[:200]}", flush=True)
